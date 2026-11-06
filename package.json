@@ -1,0 +1,13 @@
+{
+    "name": "aigc-comfyui-plugin",
+    "version": "1.8.1",
+    "private": true,
+    "type": "module",
+    "description": "AIGC 画布（Infinite Canvas）的 ComfyUI 节点插件",
+    "scripts": {
+        "build": "node build.mjs"
+    },
+    "devDependencies": {
+        "esbuild": "^0.25.0"
+    }
+}
