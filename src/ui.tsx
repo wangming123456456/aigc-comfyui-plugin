@@ -369,6 +369,8 @@ export function Panel({ ctx }: CanvasNodePanelProps) {
     );
 
     const entry = library.find((item) => item.id === config.workflowId);
+    // 上一次真正提交的种子:每次换种子时卡片上的数字已经不是实际用的那个了
+    const lastSeed = Number(ctx.node.metadata?.comfySeed || 0);
     // 「配置 → ComfyUI」里勾过的参数才上参数卡;没勾就全显示
     const selectedParamKeys = entry?.visibleParams?.length ? new Set(entry.visibleParams) : null;
     const workflowText = entry?.workflow || config.workflow;
@@ -684,6 +686,15 @@ export function Panel({ ctx }: CanvasNodePanelProps) {
                             {config.workflowName ? <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, color: theme.node.placeholder }}>{config.workflowName}</span> : null}
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto" }}>
+                            {config.randomSeed !== false && lastSeed ? <span style={{ fontSize: 11, color: theme.node.placeholder, fontVariantNumeric: "tabular-nums" }}>种子 {lastSeed}</span> : null}
+                            <button
+                                type="button"
+                                onClick={() => update({ randomSeed: config.randomSeed === false })}
+                                title={config.randomSeed === false ? "按工作流里的固定种子跑:同样的输入会拿到同样的图" : "每次运行换随机种子:否则同一份输入 ComfyUI 会直接复用上次的结果"}
+                                style={{ height: 22, padding: "0 8px", borderRadius: 999, border: `1px solid ${theme.node.stroke}`, background: "transparent", color: theme.node.placeholder, cursor: "pointer", fontSize: 11, whiteSpace: "nowrap" }}
+                            >
+                                {config.randomSeed === false ? "固定种子" : "每次换种子"}
+                            </button>
                             <button
                                 type="button"
                                 onClick={() => setSettingsOpen(false)}

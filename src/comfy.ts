@@ -23,10 +23,12 @@ export type ComfyConfig = {
     references: string[];
     // 打开后不再自动使用上游连线的图片
     ignoreUpstream?: boolean;
+    // 每次运行重新随机种子;关掉就按工作流里的固定值跑(同样的输入 ComfyUI 会直接复用上次结果)
+    randomSeed?: boolean;
     overrides: Record<string, Override>;
 };
 
-export const DEFAULT_CONFIG: ComfyConfig = { prompt: "", negativePrompt: "", workflowId: "", workflowName: "", workflow: "", references: [], ignoreUpstream: false, overrides: {} };
+export const DEFAULT_CONFIG: ComfyConfig = { prompt: "", negativePrompt: "", workflowId: "", workflowName: "", workflow: "", references: [], ignoreUpstream: false, randomSeed: true, overrides: {} };
 
 export type WorkflowEntry = { id: string; name: string; workflow: string; updatedAt: number; visibleParams?: string[] };
 
@@ -179,6 +181,34 @@ function applyParams(workflow: ApiWorkflow, overrides: Record<string, Override>)
         if (Array.isArray(node.inputs[input])) continue;
         node.inputs[input] = value;
     }
+}
+
+/** 采样类节点的种子输入名,随机种子只动这两个,别的一概不碰。 */
+const SEED_INPUTS = ["seed", "noise_seed"];
+
+/**
+ * ComfyUI 按输入签名缓存节点:同一份图再提交,连输出图都直接复用,表现就是「点了没反应、还是那张」。
+ * 每次换掉种子才会真的重跑。手动填过的种子在 applyParams 里覆盖回来,所以固定种子仍然有效。
+ */
+function randomizeSeeds(workflow: ApiWorkflow) {
+    for (const node of Object.values(workflow)) {
+        const inputs = node?.inputs;
+        if (!inputs) continue;
+        for (const name of SEED_INPUTS) {
+            if (typeof inputs[name] === "number") inputs[name] = Math.floor(Math.random() * 1e15);
+        }
+    }
+}
+
+/** 本次真正用的种子,给面板显示;工作流没有种子就是 0。 */
+function usedSeed(workflow: ApiWorkflow) {
+    for (const node of Object.values(workflow)) {
+        for (const name of SEED_INPUTS) {
+            const value = node?.inputs?.[name];
+            if (typeof value === "number") return value;
+        }
+    }
+    return 0;
 }
 
 function blobToDataUrl(blob: Blob) {
@@ -381,7 +411,10 @@ async function fetchImage(connection: Connection, image: { filename: string; sub
 async function executeWorkflow(ctx: CanvasNodeContext, config: ComfyConfig, workflow: ApiWorkflow, signal: AbortSignal) {
     const connection = await resolveConnection(ctx);
     const copy = JSON.parse(JSON.stringify(workflow)) as ApiWorkflow;
+    // 先换种子再套用参数覆盖:用户手动填过的 seed 仍然优先
+    if (config.randomSeed !== false) randomizeSeeds(copy);
     applyParams(copy, config.overrides);
+    const seed = usedSeed(copy);
 
     const targets = textTargets(copy);
     // 面板里没填就叫用上游文本节点(例如「反推提示词」产出的文本)
@@ -405,7 +438,7 @@ async function executeWorkflow(ctx: CanvasNodeContext, config: ComfyConfig, work
     const outputs = await waitForOutputs(connection, promptId, signal);
     const image = firstImage(outputs);
     if (!image) throw new Error("这次执行没有产出图片节点");
-    return fetchImage(connection, image, signal);
+    return { image: await fetchImage(connection, image, signal), seed };
 }
 
 export async function resolveWorkflowText(ctx: CanvasNodeContext, config: ComfyConfig) {
@@ -436,8 +469,8 @@ export async function runNode(ctx: CanvasNodeContext, configOverride?: ComfyConf
         const text = await resolveWorkflowText(ctx, config);
         if (!text.trim()) throw new Error("还没有选工作流:去 配置 → ComfyUI 里导入一份");
         const workflow = parseWorkflow(text);
-        const image = await executeWorkflow(ctx, config, workflow, controller.signal);
-        ctx.updateMetadata({ content: image, comfyStatus: "success", comfyError: "" });
+        const result = await executeWorkflow(ctx, config, workflow, controller.signal);
+        ctx.updateMetadata({ content: result.image, comfyStatus: "success", comfyError: "", comfySeed: result.seed });
     } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
             ctx.updateMetadata({ comfyStatus: "idle" });
