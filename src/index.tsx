@@ -8,7 +8,7 @@ import { NodeContent, Panel } from "./ui";
 export default definePlugin({
     id: "comfyui",
     name: "ComfyUI 节点",
-    version: "1.8.2",
+    version: "1.8.3",
     description: "在本机 ComfyUI 上执行 API 格式工作流,结果写回画布",
     // 参考图横条不要系统滚动条:和整体 UI 保持一致
     css: ".comfyui-ref-strip{scrollbar-width:none;-ms-overflow-style:none}.comfyui-ref-strip::-webkit-scrollbar{width:0;height:0}",

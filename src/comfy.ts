@@ -211,15 +211,6 @@ function usedSeed(workflow: ApiWorkflow) {
     return 0;
 }
 
-function blobToDataUrl(blob: Blob) {
-    return new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => reject(reader.error || new Error("读取图片失败"));
-        reader.readAsDataURL(blob);
-    });
-}
-
 function sleep(ms: number, signal: AbortSignal) {
     return new Promise<void>((resolve, reject) => {
         if (signal.aborted) {
@@ -401,11 +392,12 @@ function firstImage(outputs: Record<string, ComfyOutput>) {
     return null;
 }
 
+/** 下载生成图。返回 Blob 而不是 data URL：落盘交给宿主，省掉一次 base64 往返。 */
 async function fetchImage(connection: Connection, image: { filename: string; subfolder: string; type: string }, signal: AbortSignal) {
     const query = new URLSearchParams({ filename: image.filename, subfolder: image.subfolder || "", type: image.type || "output" });
     const response = await fetch(targetUrl(connection, `/view?${query.toString()}`), { signal });
     if (!response.ok) throw new Error(`下载生成图失败(HTTP ${response.status})`);
-    return blobToDataUrl(await response.blob());
+    return await response.blob();
 }
 
 async function executeWorkflow(ctx: CanvasNodeContext, config: ComfyConfig, workflow: ApiWorkflow, signal: AbortSignal) {
@@ -438,7 +430,7 @@ async function executeWorkflow(ctx: CanvasNodeContext, config: ComfyConfig, work
     const outputs = await waitForOutputs(connection, promptId, signal);
     const image = firstImage(outputs);
     if (!image) throw new Error("这次执行没有产出图片节点");
-    return { image: await fetchImage(connection, image, signal), seed };
+    return { blob: await fetchImage(connection, image, signal), seed };
 }
 
 export async function resolveWorkflowText(ctx: CanvasNodeContext, config: ComfyConfig) {
@@ -470,7 +462,9 @@ export async function runNode(ctx: CanvasNodeContext, configOverride?: ComfyConf
         if (!text.trim()) throw new Error("还没有选工作流:去 配置 → ComfyUI 里导入一份");
         const workflow = parseWorkflow(text);
         const result = await executeWorkflow(ctx, config, workflow, controller.signal);
-        ctx.updateMetadata({ content: result.image, comfyStatus: "success", comfyError: "", comfySeed: result.seed });
+        // 先落盘、后写引用：存不下来就当这次失败，原来的 content / storageKey 一个字都不动
+        const stored = await ctx.storeImage(result.blob);
+        ctx.updateMetadata({ content: stored.url, storageKey: stored.storageKey, comfyStatus: "success", comfyError: "", comfySeed: result.seed });
     } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
             ctx.updateMetadata({ comfyStatus: "idle" });
